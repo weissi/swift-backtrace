@@ -37,6 +37,10 @@ POSSIBILITY OF SUCH DAMAGE.  */
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "include/backtrace.h"
 #include "internal.h"
@@ -71,8 +75,38 @@ backtrace_get_view (struct backtrace_state *state ATTRIBUTE_UNUSED,
   map = mmap (NULL, size, PROT_READ, MAP_PRIVATE, descriptor, pageoff);
   if (map == MAP_FAILED)
     {
-      error_callback (data, "mmap file i/o", errno);
-      return 0;
+        int mmap_errno = errno;
+        struct stat stat = {0};
+        char *msg = NULL;
+        char filename[1024] = {0};
+	char binary[1024] = {0};
+
+        if (fstat(descriptor, &stat) == -1) {
+                error_callback (data, "fstat", errno);
+        }
+
+        asprintf(&msg, "/proc/self/fd/%d", descriptor);
+        if (readlink(msg, filename, 1024) == -1) {
+                if (errno == ENOENT) {
+                        memcpy(filename, "not found", 10);
+                } else {
+                        error_callback (data, "readlink", errno);
+                }
+        }
+        free(msg);
+        msg = NULL;
+
+	readlink("/proc/self/exe", binary, 1024);
+
+        asprintf(&msg, "filename=%s, binary=%s, fd=%d, size=%ld, mode=%d, rdev=%lu, dev=%lu, ino=%lu; mmap:size=%ld, mmap:offset=%ld",
+                 filename, binary, descriptor, stat.st_size, stat.st_mode, stat.st_rdev, stat.st_dev, stat.st_ino, size, pageoff);
+        error_callback (data, msg, mmap_errno);
+        free(msg);
+        msg = NULL;
+
+        error_callback (data, "mmap file i/o", mmap_errno);
+
+        return 0;
     }
 
   view->data = (char *) map + inpage;
